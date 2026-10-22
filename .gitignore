@@ -1,0 +1,18 @@
+# Cache bruto dos textos do Gutenberg (pode ser regenerado com src/collect.py)
+data/raw/
+
+# Checkpoints do treino (regenerados com src/train.py). O best.pt do modelo
+# grande tem ~139 MB, acima do limite de 100 MB do GitHub: publique-o numa
+# Release em vez de versioná-lo.
+checkpoints/
+checkpoints_pequeno/
+*.pt
+*.pt.tmp
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Configurações locais do Claude Code
+.claude/settings.local.json

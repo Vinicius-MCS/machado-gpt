@@ -3,10 +3,12 @@
 Este módulo transforma o texto bruto de data/dataset.txt em tensores que o
 modelo consegue consumir. Ele é usado pelo train.py e pelo generate.py:
 
-- load_text:  lê o dataset do disco.
-- Tokenizer:  converte texto ↔ lista de inteiros, um inteiro por caractere.
-- split_data: separa treino e validação, pegando um pedaço de cada obra.
-- get_batch:  sorteia trechos aleatórios e monta os pares (entrada, alvo).
+- load_text:      lê o dataset do disco.
+- Tokenizer:      converte texto ↔ lista de inteiros, um inteiro por caractere.
+- load_tokenizer: recria o tokenizador salvo (caractere ou BPE, ver bpe.py).
+- split_text:     separa treino e validação, pegando um pedaço de cada obra.
+- split_data:     faz o mesmo e já devolve os tensores de ids.
+- get_batch:      sorteia trechos aleatórios e monta os pares (entrada, alvo).
 
 Segue a abordagem da aula "Let's build GPT from scratch", de Andrej Karpathy.
 
@@ -19,6 +21,8 @@ import sys
 from pathlib import Path
 
 import torch
+
+from bpe import BPETokenizer
 
 # Raiz do projeto (pasta acima de src/), para os caminhos funcionarem
 # independentemente do diretório de onde o script é executado.
@@ -89,7 +93,8 @@ class Tokenizer:
         """
         path.parent.mkdir(parents=True, exist_ok=True)
         chars = [self.itos[i] for i in range(self.vocab_size)]
-        path.write_text(json.dumps({"chars": chars}, ensure_ascii=False), encoding="utf-8")
+        # "type" diz ao load_tokenizer qual classe recriar.
+        path.write_text(json.dumps({"type": "char", "chars": chars}, ensure_ascii=False), encoding="utf-8")
 
     @classmethod
     def load(cls, path: Path) -> "Tokenizer":
@@ -100,16 +105,33 @@ class Tokenizer:
         return cls("".join(chars))
 
 
-def split_data(
-    text: str, tokenizer: Tokenizer, val_fraction: float = 0.1
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Separa o texto em tensores de treino e validação.
+# Qualquer um dos dois tokenizadores: os dois têm a mesma interface.
+AnyTokenizer = Tokenizer | BPETokenizer
+
+
+def load_tokenizer(path: Path) -> AnyTokenizer:
+    """Recria o tokenizador salvo em `path`, seja de caractere ou BPE.
+
+    Arquivos antigos (antes do BPE) não têm o campo "type" e são de caractere.
+    """
+    kind = json.loads(path.read_text(encoding="utf-8")).get("type", "char")
+    if kind == "bpe":
+        return BPETokenizer.load(path)
+    return Tokenizer.load(path)
+
+
+def split_text(text: str, val_fraction: float = 0.1) -> tuple[str, str]:
+    """Separa o texto em treino e validação, ainda como texto.
 
     Em vez de cortar só os últimos 10% do texto concatenado, cortamos os
     últimos 10% de CADA obra. Como as obras estão em sequência no dataset, o
     corte simples deixaria a validação quase toda com Papéis Avulsos (contos),
     e a loss de validação mediria só o quanto o modelo generaliza para aquela
     obra. Pegando um pedaço de cada uma, a validação representa o corpus todo.
+
+    O corte é feito no TEXTO, antes de tokenizar. Assim, tokenizadores
+    diferentes são avaliados exatamente nos mesmos caracteres, e o BPE pode
+    ser treinado só com a parte de treino, sem "espiar" a validação.
     """
     train_parts: list[str] = []
     val_parts: list[str] = []
@@ -117,10 +139,17 @@ def split_data(
         cut = int(len(work) * (1 - val_fraction))
         train_parts.append(work[:cut])
         val_parts.append(work[cut:])
-
     # Reunimos os pedaços com o mesmo separador, para manter o padrão do dataset.
-    train_data = torch.tensor(tokenizer.encode(WORK_SEPARATOR.join(train_parts)), dtype=torch.long)
-    val_data = torch.tensor(tokenizer.encode(WORK_SEPARATOR.join(val_parts)), dtype=torch.long)
+    return WORK_SEPARATOR.join(train_parts), WORK_SEPARATOR.join(val_parts)
+
+
+def split_data(
+    text: str, tokenizer: AnyTokenizer, val_fraction: float = 0.1
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Separa o texto (ver split_text) e devolve tensores de ids de treino e validação."""
+    train_text, val_text = split_text(text, val_fraction)
+    train_data = torch.tensor(tokenizer.encode(train_text), dtype=torch.long)
+    val_data = torch.tensor(tokenizer.encode(val_text), dtype=torch.long)
     return train_data, val_data
 
 

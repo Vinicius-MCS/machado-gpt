@@ -13,6 +13,7 @@ checkpoints_pequeno/
 __pycache__/
 *.pyc
 .venv/
+.pytest_cache/
 
 # Configurações locais do Claude Code
 .claude/settings.local.json

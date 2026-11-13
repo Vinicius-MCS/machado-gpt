@@ -1,0 +1,3 @@
+# Dependências só para desenvolvimento (testes). Para treinar, basta requirements.txt.
+-r requirements.txt
+pytest

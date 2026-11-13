@@ -1,6 +1,9 @@
 # Cache bruto dos textos do Gutenberg (pode ser regenerado com src/collect.py)
 data/raw/
 
+# Cache dos tokenizadores BPE (regenerado pelo src/train.py --tokenizer bpe)
+data/tokenizers/
+
 # Checkpoints do treino (regenerados com src/train.py). O best.pt do modelo
 # grande tem ~139 MB, acima do limite de 100 MB do GitHub: publique-o numa
 # Release em vez de versioná-lo.

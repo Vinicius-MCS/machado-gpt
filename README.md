@@ -16,7 +16,8 @@ de Andrej Karpathy. Não usamos frameworks de alto nível (HuggingFace, Keras et
 
 ## Arquitetura
 
-- Tokenização character-level (um token = um caractere)
+- Tokenização character-level (um token = um caractere), ou BPE implementado do
+  zero (pedaços de palavra aprendidos do corpus), como opção
 - Embedding de tokens + positional encoding
 - N blocos de transformer, cada um com:
   - Multi-head self-attention
@@ -30,18 +31,23 @@ de Andrej Karpathy. Não usamos frameworks de alto nível (HuggingFace, Keras et
 machado-gpt/
 ├── data/
 │   ├── raw/                    # cache dos .txt baixados do Gutenberg (ignorado pelo git)
+│   ├── tokenizers/             # cache dos BPEs treinados (ignorado pelo git)
 │   └── dataset.txt             # corpus limpo usado no treino
 ├── src/
 │   ├── collect.py              # download e limpeza das obras
-│   ├── data.py                 # tokenizador, split treino/validação e batches
+│   ├── data.py                 # tokenizador de caractere, split treino/validação e batches
+│   ├── bpe.py                  # tokenizador BPE
 │   ├── model.py                # definição do modelo GPT
 │   ├── train.py                # loop de treinamento
 │   ├── generate.py             # geração de texto a partir de um prompt
-│   ├── plot_loss.py            # curvas de loss
+│   ├── plot_loss.py            # curvas de aprendizado (em bits por caractere)
 │   └── visualize_attention.py  # heatmaps dos pesos de atenção
+├── tests/                      # testes automáticos (pytest)
 ├── figures/                    # figuras geradas pelos scripts de análise
 ├── checkpoints/                # modelos treinados (ignorado pelo git)
 ├── requirements.txt
+├── requirements-dev.txt        # dependências para rodar os testes
+├── pytest.ini
 └── README.md
 ```
 
@@ -57,6 +63,14 @@ python -m venv .venv
 source .venv/bin/activate
 
 pip install -r requirements.txt
+```
+
+Para rodar os testes automáticos (tokenizadores, separação dos dados, modelo e
+funções do treino):
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
 ```
 
 ## Como usar
@@ -86,15 +100,16 @@ python src/train.py
 ```
 
 Com os padrões (5000 passos), leva cerca de 80 minutos numa CPU i5 de 13ª
-geração. A cada 250 passos o script mostra a loss de treino e validação, o tempo
-restante e uma amostra de texto. Tudo é salvo em `checkpoints/`:
+geração. A cada 250 passos o script mostra a loss de treino e validação (também
+em bits por caractere), o tempo restante e uma amostra de texto. Tudo é salvo em
+`checkpoints/`, ou na pasta indicada por `--out_dir`:
 
 | Arquivo          | Conteúdo                                              |
 |------------------|-------------------------------------------------------|
 | `best.pt`        | modelo com a menor val loss (usado na geração)        |
 | `last.pt`        | estado mais recente, para retomar o treino            |
-| `tokenizer.json` | vocabulário usado no treino                           |
-| `train_log.csv`  | loss de treino/validação a cada avaliação             |
+| `tokenizer.json` | vocabulário usado no treino (caractere ou BPE)        |
+| `train_log.csv`  | loss e bits por caractere de treino/validação a cada avaliação |
 
 Opções úteis:
 
@@ -119,6 +134,42 @@ python -u src/train.py --n_embd 384 --n_head 6 --n_layer 6 --dropout 0.2 \
 
 Numa GPU P100 do Kaggle, isso levou cerca de 50 minutos.
 
+#### Treino com BPE
+
+Por padrão, cada token é um caractere. Com `--tokenizer bpe`, o texto é cortado
+em pedaços de palavra aprendidos do próprio corpus pelo algoritmo BPE
+(`src/bpe.py`): ` que`, `ão`, ` perguntou`... Com o mesmo `block_size`, o modelo
+enxerga mais texto, porque cada token vale ~2 a 3 caracteres.
+
+```bash
+python src/train.py --tokenizer bpe --vocab_size 1000 --out_dir checkpoints_bpe1000
+```
+
+- `--vocab_size` é o tamanho **total** do vocabulário (caracteres + fusões).
+- O BPE é treinado só com o texto de treino (as fusões nunca "veem" a
+  validação) e fica em cache em `data/tokenizers/`. Treiná-lo leva de segundos
+  a poucos minutos, só na primeira vez.
+- `--out_dir` separa os checkpoints de cada experimento. Sem ele, o treino
+  sobrescreve `checkpoints/`.
+- `--tie_weights` faz a `lm_head` usar a mesma matriz do embedding de tokens
+  (como no GPT-2), economizando `vocab_size × n_embd` parâmetros.
+
+A loss é o erro **por token**, então não dá para comparar a loss de um modelo
+BPE com a de um modelo de caractere. Para isso, o treino também mostra o erro
+em **bits por caractere**: `loss ÷ (caracteres por token) ÷ ln 2`. Para o
+tokenizador de caractere, é só a loss ÷ ln 2.
+
+Experimento de tamanho do vocabulário (na GPU, mudando só o vocabulário):
+
+```bash
+for V in 500 1000 2000; do
+  python -u src/train.py --tokenizer bpe --vocab_size $V --out_dir checkpoints_bpe$V \
+      --n_embd 384 --n_head 6 --n_layer 6 --dropout 0.2 \
+      --batch_size 64 --max_iters 5000 --eval_interval 500 --eval_iters 100
+done
+python src/plot_loss.py --runs checkpoints checkpoints_bpe500 checkpoints_bpe1000 checkpoints_bpe2000
+```
+
 ### 3. Retomada
 
 Aperte **Ctrl+C** a qualquer momento: o estado atual é salvo em `last.pt`. Para
@@ -128,8 +179,9 @@ continuar de onde parou:
 python src/train.py --resume
 ```
 
-A arquitetura vem sempre do checkpoint; `--max_iters` pode ser aumentado para
-treinar por mais passos.
+A arquitetura e o tokenizador vêm sempre do checkpoint; `--max_iters` pode ser
+aumentado para treinar por mais passos. Se o treino usou `--out_dir`, passe a
+mesma pasta: `python src/train.py --resume --out_dir checkpoints_bpe1000`.
 
 ### 4. Geração
 
@@ -137,15 +189,16 @@ treinar por mais passos.
 python src/generate.py --prompt "Capitu"
 ```
 
-O texto aparece caractere por caractere (streaming). Ctrl+C interrompe a
+O texto aparece token por token (streaming): um caractere por vez no modelo de
+caractere, um pedaço de palavra por vez num modelo BPE. Ctrl+C interrompe a
 geração. Parâmetros de amostragem:
 
 | Parâmetro          | Padrão          | Efeito                                                   |
 |--------------------|-----------------|----------------------------------------------------------|
 | `--prompt`         | `"\n"`          | texto inicial (`\n` vira quebra de linha)                |
-| `--max_new_tokens` | 500             | quantos caracteres gerar                                 |
+| `--max_new_tokens` | 500             | quantos tokens gerar                                     |
 | `--temperature`    | 0.8             | < 1: mais conservador; > 1: mais criativo e com erros    |
-| `--top_k`          | nenhum          | sorteia só entre os k caracteres mais prováveis          |
+| `--top_k`          | nenhum          | sorteia só entre os k tokens mais prováveis              |
 | `--num_samples`    | 1               | quantas gerações independentes                           |
 | `--seed`           | nenhum          | fixa o resultado (reprodutível)                          |
 | `--checkpoint`     | `checkpoints/best.pt` | checkpoint a usar                                  |
@@ -174,7 +227,7 @@ não funcionam).
 Dois scripts geram figuras em `figures/` (requerem `matplotlib`):
 
 ```bash
-# curvas de loss (treino, validação e a diferença entre elas)
+# curvas de aprendizado (treino, validação e a diferença entre elas)
 python src/plot_loss.py
 python src/plot_loss.py --runs checkpoints_pequeno checkpoints --output figures/loss_curves.png
 
@@ -184,33 +237,36 @@ python src/visualize_attention.py --layer 0
 python src/visualize_attention.py --checkpoint checkpoints_pequeno/best.pt --text "Era uma vez"
 ```
 
-- **`plot_loss.py`** lê o `train_log.csv` e o `best.pt` de cada pasta, plota
-  train e val loss por passo (com a loss de chute aleatório, ln(vocab_size),
-  como referência) e a diferença val − train, que indica overfitting. No
-  terminal, mostra uma tabela com parâmetros, passos, caracteres vistos no
-  treino e as losses finais.
+- **`plot_loss.py`** lê o `train_log.csv` e o `best.pt` de cada pasta e plota o
+  erro de treino e validação por passo, em **bits por caractere**, para que
+  modelos de caractere e de BPE fiquem na mesma unidade (com o erro de chute
+  aleatório como referência), e a diferença val − train, que indica
+  overfitting. No terminal, mostra uma tabela com parâmetros, tokenizador,
+  caracteres por token, passos, caracteres vistos no treino e os erros finais.
 - **`visualize_attention.py`** roda o modelo sobre um texto curto (até ~60
-  caracteres, para os rótulos ficarem legíveis) e salva um heatmap por cabeça
-  da camada escolhida (`figures/attention_layer{N}.png`) e uma visão geral de
+  tokens, para os rótulos ficarem legíveis) e salva um heatmap por cabeça da
+  camada escolhida (`figures/attention_layer{N}.png`) e uma visão geral de
   todas as camadas × cabeças (`figures/attention_overview.png`, sobrescrita a
-  cada execução). No terminal, lista os caracteres que mais recebem atenção em
-  algumas posições do texto.
+  cada execução). Os rótulos são os tokens do modelo: caracteres, ou pedaços
+  de palavra num modelo BPE. No terminal, lista os tokens que mais recebem
+  atenção em algumas posições do texto.
 
 ## Resultados
 
 Foram treinados dois modelos, ambos por 5000 passos:
 
-| Modelo  | Parâmetros | Arquitetura (n_embd / cabeças / camadas) | Dados    | Hardware   | Melhor val loss |
-|---------|-----------:|------------------------------------------|----------|------------|----------------:|
-| Pequeno |     0,85 M | 128 / 4 / 4, dropout 0.1, batch 32       | 5 obras  | CPU, ~75 min | 1,4304 |
-| Grande  |    10,8 M  | 384 / 6 / 6, dropout 0.2, batch 64       | 11 obras | GPU, ~50 min | 1,2188 |
+| Modelo  | Parâmetros | Arquitetura (n_embd / cabeças / camadas) | Dados    | Hardware   | Melhor val loss | Bits por caractere |
+|---------|-----------:|------------------------------------------|----------|------------|----------------:|-------------------:|
+| Pequeno |     0,85 M | 128 / 4 / 4, dropout 0.1, batch 32       | 5 obras  | CPU, ~75 min | 1,4304 | 2,064 |
+| Grande  |    10,8 M  | 384 / 6 / 6, dropout 0.2, batch 64       | 11 obras | GPU, ~50 min | 1,2188 | 1,758 |
 
-Para comparação, um modelo que chuta ao acaso tem loss ln(vocab_size) ≈ 4,8.
+Para comparação, um modelo que chuta ao acaso tem loss ln(vocab_size) ≈ 4,8, ou
+~6,9 bits por caractere. Os dois modelos usam o tokenizador de caractere.
 O modelo grande escreve quase só palavras reais, na grafia da época, e frases
 curtas gramaticais, mas ainda sem sentido entre as frases: é o limite esperado
 de um modelo character-level desse tamanho.
 
-![Curvas de loss](figures/loss_curves.png)
+![Curvas de aprendizado](figures/loss_curves.png)
 
 Pesos de atenção do modelo grande para o texto
 `--Capitu, que é isso? perguntou José Dias.` Na primeira camada, as cabeças
@@ -234,7 +290,7 @@ Os checkpoints não estão no repositório (o `best.pt` do modelo grande tem
 
 | Parâmetro       | Valor | Descrição                              |
 |-----------------|-------|----------------------------------------|
-| `block_size`    | 256   | Tamanho do contexto (em caracteres)    |
+| `block_size`    | 256   | Tamanho do contexto (em tokens)        |
 | `n_embd`        | 128   | Dimensão dos embeddings                |
 | `n_head`        | 4     | Número de cabeças de atenção           |
 | `n_layer`       | 4     | Número de blocos de transformer        |

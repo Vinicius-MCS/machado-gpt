@@ -37,6 +37,7 @@ class GPTConfig:
     n_head: int = 4  # número de cabeças de atenção por bloco
     n_layer: int = 4  # número de blocos
     dropout: float = 0.1
+    tie_weights: bool = False  # compartilhar a matriz do embedding com a lm_head
 
     def __post_init__(self) -> None:
         # Cada cabeça recebe uma fatia de n_embd / n_head canais; a divisão
@@ -189,6 +190,13 @@ class GPTLanguageModel(nn.Module):
         self.blocks = nn.Sequential(*[Block(config) for _ in range(config.n_layer)])
         self.ln_f = nn.LayerNorm(config.n_embd)  # LayerNorm final
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size)
+        if config.tie_weights:
+            # Weight tying (como no GPT-2): as duas matrizes têm formato (V, C),
+            # uma linha por token. O embedding transforma o token em vetor; a
+            # lm_head compara o vetor final com cada linha para pontuar o
+            # próximo token. Usando a MESMA matriz, economizamos V × C
+            # parâmetros e o que o modelo aprende numa ponta ajuda a outra.
+            self.lm_head.weight = self.token_embedding.weight
         self.apply(self._init_weights)
 
     def _init_weights(self, module: nn.Module) -> None:

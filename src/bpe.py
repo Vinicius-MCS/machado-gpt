@@ -89,13 +89,21 @@ class BPETokenizer:
         self._cache: dict[str, list[int]] = {}
 
     @classmethod
-    def train(cls, text: str, vocab_size: int, verbose: bool = False) -> "BPETokenizer":
+    def train(
+        cls, text: str, vocab_size: int, alphabet: str = "", verbose: bool = False
+    ) -> "BPETokenizer":
         """Aprende as fusões a partir de um texto.
 
         vocab_size é o tamanho TOTAL do vocabulário (caracteres + fusões), que
         é o que define o tamanho das camadas de embedding e de saída do modelo.
+
+        alphabet: caracteres extras que devem existir no vocabulário-base mesmo
+        sem aparecer em `text`. O train.py passa os caracteres do dataset
+        inteiro: as fusões são aprendidas só com o treino, mas um caractere
+        raro que só aparece na validação (como o "Í" de um "ÍNDICE" no fim do
+        livro) precisa existir, senão a validação nem pode ser codificada.
         """
-        chars = sorted(set(text))
+        chars = sorted(set(text) | set(alphabet))
         num_merges = vocab_size - len(chars)
         if num_merges < 0:
             raise ValueError(

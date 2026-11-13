@@ -49,6 +49,19 @@ def test_exemplo_calculado_a_mao() -> None:
     assert [tokenizer.itos[i] for i in tokenizer.encode("casas")] == ["cas", "as"]
 
 
+def test_alfabeto_extra_entra_no_vocabulario_sem_mudar_as_fusoes() -> None:
+    """Um caractere que só existe na validação (alphabet) pode ser codificado."""
+    train_text = "\n".join(["casa"] * 3 + ["casas"] * 2 + ["caso"])
+    plain = BPETokenizer.train(train_text, vocab_size=len(set(train_text)) + 3)
+    extended = BPETokenizer.train(train_text, vocab_size=len(set(train_text)) + 1 + 3, alphabet="Í")
+    assert "Í" in extended.stoi
+    assert extended.decode(extended.encode("Ícasa")) == "Ícasa"
+    # As fusões aprendidas são as mesmas, só os ids se deslocam por causa do "Í".
+    def merged(tokenizer: BPETokenizer) -> list[str]:
+        return [tokenizer.itos[a] + tokenizer.itos[b] for a, b in tokenizer.merges]
+    assert merged(extended) == merged(plain) == ["as", "cas", "casa"]
+
+
 def test_vocab_size_e_o_total(corpus_tokenizer: BPETokenizer) -> None:
     """Decisão 4: vocab_size conta caracteres + fusões."""
     assert corpus_tokenizer.vocab_size == CORPUS_VOCAB_SIZE

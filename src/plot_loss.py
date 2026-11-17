@@ -3,8 +3,9 @@
 Lê o train_log.csv e o best.pt de cada pasta de checkpoint e gera uma figura
 com dois gráficos lado a lado:
 
-1. erro de treino (tracejado) e de validação (cheio) por passo, com o erro de
-   "chute aleatório" como referência;
+1. erro de treino (tracejado) e de validação (cheio) por passo, com uma
+   estrela no melhor ponto de validação (onde o best.pt foi salvo) e o erro
+   de "chute aleatório" de cada modelo na legenda, como referência;
 2. a diferença val − train ao longo do treino.
 
 Tudo é medido em bits por caractere, e não em loss. A loss é o erro por
@@ -29,6 +30,7 @@ import matplotlib
 
 matplotlib.use("Agg")  # gera PNG sem precisar de janela gráfica
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 
 from bpe import BPETokenizer
 from generate import load_model
@@ -122,21 +124,35 @@ def plot_runs(runs: list[dict], output: Path) -> None:
     colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 
     for run, color in zip(runs, colors):
-        # Mesma cor por modelo: cheia = validação, tracejada = treino.
-        ax_bpc.plot(run["iters"], run["val_bpc"], color=color, label=f"{run['label']} — val")
-        ax_bpc.plot(run["iters"], run["train_bpc"], color=color, linestyle="--",
-                    label=f"{run['name']} — train")
-        # Erro de quem chuta uniformemente entre os tokens. Qualquer modelo
-        # que aprendeu algo fica bem abaixo dessa linha.
-        ax_bpc.axhline(run["random_bpc"], color=color, linestyle=":", linewidth=1,
-                       label=f"{run['name']} — chute aleatório")
+        # Mesma cor por modelo: cheia = validação, tracejada = treino. Só a
+        # curva de validação entra na legenda: uma entrada por modelo.
+        # O erro de chute aleatório (quem chuta uniformemente entre os tokens)
+        # vai no texto da legenda, e não como linha: ele fica muito acima das
+        # curvas e espremeria o eixo justamente onde os modelos se diferenciam.
+        ax_bpc.plot(run["iters"], run["val_bpc"], color=color,
+                    label=f"{run['label']} · chute {run['random_bpc']:.2f}")
+        ax_bpc.plot(run["iters"], run["train_bpc"], color=color, linestyle="--")
+        # Estrela no melhor ponto de validação: é onde o best.pt foi salvo.
+        # Depois dele, se a validação sobe, o modelo está decorando.
+        best = min(range(len(run["val_bpc"])), key=run["val_bpc"].__getitem__)
+        ax_bpc.plot(run["iters"][best], run["val_bpc"][best], marker="*", markersize=15,
+                    color=color, markeredgecolor="black", linestyle="none")
         gap = [val - train for val, train in zip(run["val_bpc"], run["train_bpc"])]
         ax_gap.plot(run["iters"], gap, color=color, marker="o", markersize=3, label=run["name"])
 
     ax_bpc.set_title("Erro de treino e validação")
     ax_bpc.set_xlabel("passo")
     ax_bpc.set_ylabel("bits por caractere")
-    ax_bpc.legend(fontsize=8)
+    # Duas legendas: os modelos (cores) e a chave de estilo, igual para todos.
+    ax_bpc.add_artist(ax_bpc.legend(fontsize=8, loc="upper right", title="validação, por modelo",
+                                    title_fontsize=8))
+    style_key = [
+        Line2D([], [], color="gray", label="validação"),
+        Line2D([], [], color="gray", linestyle="--", label="treino"),
+        Line2D([], [], color="gray", marker="*", markersize=11, markeredgecolor="black",
+               linestyle="none", label="melhor validação (best.pt)"),
+    ]
+    ax_bpc.legend(handles=style_key, fontsize=8, loc="lower left")
     ax_bpc.grid(alpha=0.3)
 
     ax_gap.set_title("Diferença val − train (quanto o modelo decora)")

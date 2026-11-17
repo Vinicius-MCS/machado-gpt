@@ -167,8 +167,12 @@ for V in 500 1000 2000; do
       --n_embd 384 --n_head 6 --n_layer 6 --dropout 0.2 \
       --batch_size 64 --max_iters 5000 --eval_interval 500 --eval_iters 100
 done
-python src/plot_loss.py --runs checkpoints checkpoints_bpe500 checkpoints_bpe1000 checkpoints_bpe2000
+python src/plot_loss.py --runs checkpoints checkpoints_bpe500 checkpoints_bpe1000 checkpoints_bpe2000 \
+    --output figures/bpe_vocab.png
 ```
+
+Numa GPU T4 do Kaggle, cada rodada levou cerca de 46 minutos. Os resultados
+estão na seção [Experimento: tokenizador BPE](#experimento-tokenizador-bpe).
 
 ### 3. Retomada
 
@@ -253,6 +257,8 @@ python src/visualize_attention.py --checkpoint checkpoints_pequeno/best.pt --tex
 
 ## Resultados
 
+### Modelos de caractere
+
 Foram treinados dois modelos, ambos por 5000 passos:
 
 | Modelo  | Parâmetros | Arquitetura (n_embd / cabeças / camadas) | Dados    | Hardware   | Melhor val loss | Bits por caractere |
@@ -280,6 +286,58 @@ longas (como o início da palavra atual):
 | [`attention_layer0.png`](figures/attention_layer0.png) | modelo grande, primeira camada |
 | [`attention_layer5.png`](figures/attention_layer5.png) | modelo grande, última camada |
 | [`attention_layer3.png`](figures/attention_layer3.png) | modelo pequeno, última camada |
+
+### Experimento: tokenizador BPE
+
+O modelo grande foi treinado de novo três vezes, mudando **só o tokenizador**:
+BPE com vocabulário de 500, 1.000 e 2.000 tokens. Arquitetura, batch, learning
+rate, número de passos, seed e conjunto de validação foram os mesmos do modelo
+grande de caractere. Como a loss de modelos com tokenizadores diferentes não é
+comparável, a comparação é feita em **bits por caractere** (quanto menor, melhor).
+
+| Tokenizador | Caracteres por token | Parâmetros | Melhor validação (bits/caractere) | Passo do melhor | Val − train nesse passo |
+|-------------|---------------------:|-----------:|----------------------------------:|----------------:|------------------------:|
+| Caractere (122) | 1,00 | 10,83 M | 1,758 | 5000 | 0,16 |
+| BPE 500     | 2,17 | 11,12 M | 1,713 | 4000 | 0,38 |
+| **BPE 1000** | 2,57 | 11,51 M | **1,710** | 3000 | 0,40 |
+| BPE 2000    | 2,96 | 12,28 M | 1,725 | 2500 | 0,45 |
+
+![Caractere x BPE](figures/bpe_vocab.png)
+
+O que o experimento mostrou:
+
+- **Os três vocabulários BPE superaram o tokenizador de caractere.** O melhor
+  (1.000 tokens) erra 0,048 bit a menos por caractere, uma melhora de ~2,7%.
+- **500 e 1.000 empataram:** a diferença entre eles (0,002) é do tamanho do
+  ruído da medição. **2.000 já foi pior**, mesmo comprimindo mais o texto: com
+  um corpus pequeno, um vocabulário grande demais tem muitos tokens raros, mal
+  treinados.
+- **O BPE decora o texto muito mais rápido.** Todos os modelos treinaram 5000
+  passos de 64 × 256 tokens, mas o texto de treino tem menos tokens quanto
+  maior o vocabulário. Em 5000 passos, o modelo de caractere passou ~25 vezes
+  pelo texto de treino; os de BPE, de ~55 (500) a ~76 vezes (2.000). Por isso
+  a validação deles atinge o mínimo cedo (as estrelas na figura) e depois
+  volta a subir, enquanto a diferença val − train dispara. O `best.pt` guarda
+  cada modelo no seu melhor ponto, antes do overfitting.
+- **Nos melhores checkpoints, nenhum modelo copia o treino.** No teste de
+  memorização (10 textos gerados de 500 caracteres por modelo), o maior trecho
+  idêntico ao texto de treino teve no máximo 23 a 34 caracteres, e no máximo
+  0,7% do texto gerado estava em trechos idênticos de 30 caracteres ou mais. Em
+  trechos reais de Machado tirados da validação, esses números chegam a 52
+  caracteres e 3%: o próprio autor se repete mais.
+
+Limitações desta comparação:
+
+- O modelo de caractere ainda estava melhorando no passo 5000; com mais passos,
+  ele poderia diminuir parte da diferença.
+- Cada configuração foi treinada uma única vez (uma seed), então diferenças
+  pequenas, como entre 500 e 1.000, não são conclusivas.
+- O melhor vocabulário foi escolhido pelo mesmo conjunto de validação em que o
+  resultado é reportado, o que deixa o número levemente otimista. Um conjunto
+  de teste separado daria uma medida mais rigorosa.
+
+Próximos experimentos possíveis: combater o overfitting do BPE com
+`--tie_weights` (menos parâmetros no vocabulário), mais dropout ou menos passos.
 
 Os checkpoints não estão no repositório (o `best.pt` do modelo grande tem
 ~139 MB). Para gerar texto, treine um modelo com `src/train.py` ou baixe o

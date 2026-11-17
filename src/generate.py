@@ -30,7 +30,7 @@ from pathlib import Path
 
 import torch
 
-from data import Tokenizer
+from data import AnyTokenizer, load_tokenizer
 from model import GPTConfig, GPTLanguageModel
 from train import BEST_PATH, TOKENIZER_PATH, resolve_device
 
@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_model(checkpoint_path: Path, device: str) -> tuple[GPTLanguageModel, dict, Tokenizer]:
+def load_model(checkpoint_path: Path, device: str) -> tuple[GPTLanguageModel, dict, AnyTokenizer]:
     """Reconstrói o modelo e o tokenizador a partir do checkpoint."""
     # Cada checkpoint tem o seu próprio vocabulário: o tokenizador precisa vir
     # da mesma pasta, senão os ids não correspondem aos caracteres certos.
@@ -61,7 +61,8 @@ def load_model(checkpoint_path: Path, device: str) -> tuple[GPTLanguageModel, di
         if not path.exists():
             sys.exit(f"Erro: {path} não encontrado. Treine o modelo primeiro com: python src/train.py")
     checkpoint = torch.load(checkpoint_path, map_location=device)
-    tokenizer = Tokenizer.load(tokenizer_path)
+    # load_tokenizer recria o tipo certo (caractere ou BPE) pelo JSON salvo.
+    tokenizer = load_tokenizer(tokenizer_path)
     if tokenizer.vocab_size != checkpoint["config"]["vocab_size"]:
         sys.exit(
             f"Erro: {tokenizer_path} tem {tokenizer.vocab_size} caracteres, mas o checkpoint "

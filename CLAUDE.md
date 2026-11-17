@@ -12,7 +12,9 @@ O foco é didático: entender cada componente do transformer na prática.
 - Sem frameworks de alto nível (sem HuggingFace, sem Keras)
 
 ## Arquitetura alvo
-- Tokenização: character-level (um token = um caractere)
+- Tokenização: character-level (um token = um caractere, padrão) ou BPE com
+  caracteres como base (src/bpe.py, --tokenizer bpe), para comparação
+- Métrica comparável entre tokenizadores: bits por caractere
 - Embedding + positional encoding
 - N blocos de self-attention (multi-head)
 - Feed-forward MLP por bloco
@@ -41,10 +43,12 @@ O foco é didático: entender cada componente do transformer na prática.
 ## Como rodar
 - Coleta: python src/collect.py
 - Treino: python src/train.py
+- Treino com BPE: python src/train.py --tokenizer bpe --vocab_size 1000 --out_dir checkpoints_bpe1000
 - Geração: python src/generate.py --prompt "Capitu"
+- Testes: python -m pytest (dependências em requirements-dev.txt)
 
 ## Hiperparâmetros padrão (ajustáveis)
-- block_size: 256 (contexto de 256 caracteres)
+- block_size: 256 (contexto de 256 tokens; 256 caracteres no tokenizador de caractere)
 - n_embd: 128
 - n_head: 4
 - n_layer: 4
